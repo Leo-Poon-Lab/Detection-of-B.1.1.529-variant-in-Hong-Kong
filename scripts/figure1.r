@@ -1,5 +1,5 @@
-# Figure 1A: Timeline of the two cases
-# Figure 2B. Phylogenetic tree of the two cases
+# Figure (Supplementary): Timeline of the two cases
+# Figure (Main). Phylogenetic tree of the two cases
 
 library(tidyverse)
 library(Biostrings)
@@ -10,8 +10,9 @@ library(lubridate)
 library(shadowtext)
 library(ggrepel)
 library(patchwork)
+source("https://raw.githubusercontent.com/Koohoko/Save-ggplot-to-pptx/main/scripts/save_pptx.r")
 
-# Figure 1A 
+# Figure (Supplementary): Timeline of the two cases
 df_tl <- readxl::read_excel("../data/B.1.1.529_HK.xlsx",2)
 df_tl$Name <- gsub("\\", "_", df_tl$Name, fixed=T)
 df_tl$Name <- gsub("_n", "\n", df_tl$Name, fixed=T)
@@ -75,54 +76,100 @@ p1<-timeline_plot+
 	guides(color = guide_legend(override.aes = list(alpha=1)))+ 
 	NULL
 
-p1 <- p1+geom_text(x=ymd("2021-11-08"),y=-0.5,label="Case B", color="Black")+geom_text(x=ymd("2021-11-08"),y=0.5,label="Case A", color="Black")+ggtitle("A")
+p1 <- p1+
+	geom_text(x=ymd("2021-11-08"),y=-0.5,label="Case B", color="Black")+
+	geom_text(x=ymd("2021-11-08"),y=0.5,label="Case A", color="Black")+
+	# ggtitle("A")+
+	NULL
 ggsave("../results/timeline.pdf", height = 5, width = 5*sqrt(2))
+ggsave("../results/timeline.png", height = 5, width = 5*sqrt(2))
 
+# Figure (Main). Phylogenetic tree of the two cases
+## determine helper sequences
+df_seq_meta <- read_tsv("../data/metadata.tsv")
+df_seq_meta_selected <- df_seq_meta %>% arrange(date) %>% group_by(pango_lineage) %>% mutate(id=seq(n())) %>% filter(id==1) %>% ungroup()
+df_seq_meta_selected <- df_seq_meta_selected %>% filter(grepl("^B$", pango_lineage) | grepl("^B.1.1", pango_lineage) | grepl("^B.1.617", pango_lineage)| grepl("^B.1.351", pango_lineage)| grepl("^P.1", pango_lineage)| grepl("^P.2", pango_lineage)| grepl("^P.3", pango_lineage)| grepl("^B.1.621", pango_lineage)| grepl("^C.37", pango_lineage)| grepl("^B.1.526", pango_lineage)| grepl("^B.1.525", pango_lineage)| grepl("^B.1.427", pango_lineage)| grepl("^B.1.429", pango_lineage))
+seqs_ref <- readDNAStringSet("../data/aligned.fasta")
+seqs_ref <- seqs_ref[names(seqs_ref) %in% df_seq_meta_selected$strain]
 
-# Figure 1B
+## HK  b.1.1.529 sequences
 seqs <- readDNAStringSet("../data/seqs_20211125.fasta")
-df_lin <- read_csv("../data/lineage_20211126.csv")
-cov_check <- apply(alphabetFrequency(seqs), 1, function(x){
-	sum(x[1:4])
-})
-cov_check <- round(cov_check/29903*100, 2)
-df_seqs_ori <- tibble(taxon=names(seqs), coverage=cov_check)
-df_seqs_ori <- left_join(df_seqs_ori, df_lin)
-df_seqs <- df_seqs_ori %>% filter(grepl("WHP", taxon)) %>% arrange(coverage)
-df_seqs <- df_seqs %>% group_by(lineage) %>% mutate(idx=seq(n())) %>% ungroup()
-df_seqs_sub_ref <- df_seqs %>% filter(idx==1 & lineage!="None")
-df_seqs_sub_ref$label2 <- paste0("HK-case_", df_seqs_sub_ref$lineage)
-df_seqs_sub_int <- df_seqs_ori %>% filter(lineage=="B.1.1.529" | grepl("12388", taxon) | grepl("12404", taxon) | grepl("MN908947", taxon))
-df_seqs_sub_int$label2 <- df_seqs_sub_int$taxon
-df_seqs_sub_int$label2[grepl("12388", df_seqs_sub_int$taxon)] <- "Case A"
-df_seqs_sub_int$label2[grepl("12404", df_seqs_sub_int$taxon)] <- "Case B"
+seqs_hk <- seqs[grepl("12388", names(seqs)) | grepl("12404", names(seqs)) ]
+names(seqs_hk)[grepl("12388", names(seqs_hk))] <- "Case_A"
+names(seqs_hk)[grepl("12404", names(seqs_hk))] <- "Case_B"
 
-df_sub_all <- bind_rows(df_seqs_sub_ref, df_seqs_sub_int)
-df_sub_all <- unique(df_sub_all)
-df_sub_all$label <- df_sub_all$taxon
-df_sub_all$lineage_sim <- "Others"
-df_sub_all$lineage_sim[grepl("B.1.1.529", df_sub_all$lineage) | grepl("^Case", df_sub_all$label2)] <- "B.1.1.529"
-df_sub_all$label2[grepl("MN908947", df_sub_all$taxon)] <- "Wuhan-Hu-01"
-seqs_sub <- seqs[names(seqs) %in% df_sub_all$taxon]
+writeXStringSet(c(seqs[1], seqs_hk), "../results/seqs_hk_toalign.fasta") ## compare with the Sanger results
+file_in <- "../results/sanger_seqs_add.fasta"
+file_out <- "../results/seqs_hk_sanger.fasta"
+system(paste0("mafft --localpair --maxiterate 1000 --thread -8 --keeplength --addfragments ", file_in, " ../results/ref_seq.fasta > ", file_out)) ## visual inspection
+# system(paste0("mafft --localpair --maxiterate 1000 --thread -8 --keeplength --addfragments ", "../results/sanger_seqs_long.fasta", " ../results/ref_seq.fasta > ", "../results/seqs_hk_sanger_long.fasta")) ## visual inspection
+
+seqs_edit <- readDNAStringSet("../results/../results/seqs_hk_sanger_edit.fasta")
+seqs_hk <- seqs_edit[grepl("filled", names(seqs_edit))]
+names(seqs_hk) <- gsub("_filled", "", names(seqs_hk))
+
+seqs_sub <- c(seqs_ref, seqs_hk)
 file_seqs_sub <- "../results/seqs_sub.fasta"
 writeXStringSet(seqs_sub, file_seqs_sub)
 
-system(paste0('~/softwares/iqtree-2.1.3-MacOSX/bin/iqtree2 -T 16 --redo -s ', file_seqs_sub, ' -o "MN908947_3"')) # using iqtree
+df_date <- df_seq_meta_selected %>% select(strain, date)
+df_date <- bind_rows(df_date, tibble(strain=c("Case_A", "Case_B"), date=ymd(c("2021-11-13", "2021-11-18"))))
+write_tsv(df_date, "../results/df_date.tsv", col_names=F)
+
+system(paste0('~/Documents/iqtree-2.1.3-MacOSX/bin/iqtree2 -T 16 -m GTR+F+R2 --redo -s ', file_seqs_sub, ' -o "Wuhan-Hu-1/2019" --date ../results/df_date.tsv --date-root 2019-12-26 --date-ci 100 --date-options "-l -1"'))
 
 tree <- read.tree("../results/seqs_sub.fasta.treefile")
-p <- ggtree(tree, size=0.5)
-p$data <- left_join(p$data, df_sub_all)
+p <- ggtree(tree, size=0.3)
+df_seq_meta$label <- df_seq_meta$strain
+df_seq_meta$label2 <- df_seq_meta$pango_lineage
+p$data <- left_join(p$data, df_seq_meta)
+p$data$lineage_sim <- ifelse(grepl("^Case_", p$data$label), "B", "Others")
+p$data$lineage_sim[p$data$label2 %in% c("B.1.1.7", "B.1.351", "B.1.617.2", "P.1")] <- "B"
+p$data$label <-  gsub("Case_", "Case ", p$data$label, fixed=T)
+# p$data$label2[grepl("^Case_", p$data$label)] <- p$data$label[grepl("^Case_", p$data$label)]
+# p$data$text_size <- ifelse(grepl("^Case_", p$data$label), 0.6, 0.2)
+
+font_size=2.2
 
 p2 <- p + 
-	geom_tiplab(aes(label=label2, color=lineage_sim), show.legend = FALSE, size=1.8)+
-	geom_tippoint(aes(color=lineage_sim), show.legend = FALSE, alpha=0.8)+
+	geom_tiplab(aes(label=label2, color=lineage_sim), show.legend = FALSE, size=font_size)+
+	geom_text_repel(aes(label=label), size=5, data=. %>% filter(grepl("^Case", label)), color=pal_uchicago()(1), nudge_x=0.0003, alpha=0.9)+
+	geom_tippoint(aes(color=lineage_sim), show.legend = FALSE, alpha=0.8, size=0.3)+
 	scale_color_uchicago()+
 	theme(legend.position = "bottom")+
-	xlim(0, 0.003)+
-	ggtitle("B")
-
+	# xlim(0, 0.003)+
+	ggtitle("A")+
+	NULL
 ggsave("../results/tree.pdf", heigh=10, width = 6)
 
-p3 <- p1/p2 + plot_layout(heights = c(0.3, 0.7),guides='collect') &
-  theme(legend.position='top')
-ggsave("../results/Figure 1.pdf", heigh=13, width = 13/sqrt(2))
+timetree <- treeio::read.beast("../results/seqs_sub.fasta.timetree.nex")
+mrsd <- max(df_date$date, na.rm = T)
+p <- ggtree(timetree, mrsd=mrsd, size=0.2) + theme_tree2()
+df_seq_meta$label <- df_seq_meta$strain
+df_seq_meta$label2 <- df_seq_meta$pango_lineage
+p$data <- left_join(p$data, df_seq_meta, "label")
+p$data$lineage_sim <- ifelse(grepl("^Case_", p$data$label), "B", "Others")
+p$data$lineage_sim[p$data$label2 %in% c("B.1.1.7", "B.1.351", "B.1.617.2", "P.1")] <- "B"
+p$data$label <-  gsub("Case_", "Case ", p$data$label, fixed=T)
+# p$data$label2[grepl("^Case_", p$data$label)] <- p$data$label[grepl("^Case_", p$data$label)]
+# p$data$text_size <- ifelse(grepl("^Case_", p$data$label), 0.6, 0.2)
+
+labels_t <- c("2020-01-01", "2020-07-01", "2021-01-01", "2021-07-01", "2021-12-01")
+breaks_t <- Date2decimal(labels_t)
+
+p2_time <- p + 
+	geom_tiplab(aes(label=label2), show.legend = FALSE, size=font_size, color="black")+
+	# geom_text_repel(aes(label=label2, color=lineage_sim), show.legend = FALSE, size=2)+
+	geom_text_repel(aes(label=label), size=5, data=. %>% filter(grepl("^Case", label)), color=pal_uchicago()(1), nudge_x=0.3, alpha=0.9)+
+	geom_tippoint(aes(color=lineage_sim), show.legend = FALSE, alpha=0.8, size=0.3)+
+	scale_color_uchicago()+
+	theme(legend.position = "bottom")+
+	scale_x_continuous(limits=c(2019.9, 2022.5), breaks=breaks_t, labels=labels_t)+
+	# xlim(0, 0.003)+
+	ggtitle("A")+
+	NULL
+
+ggsave("../results/timetree.pdf", height=10, width = 6)
+save_pptx("../results/timetree.pptx", width=7.5*sqrt(2)*0.75, height=7.5, plot=p2_time)
+save(p2, p2_time, file="../results/p2.rdata")
+

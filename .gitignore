@@ -1,3 +1,4 @@
 /draft/*
 /data/*
 /results/*
+!/results/timeline.png

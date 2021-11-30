@@ -4,6 +4,9 @@
 library(tidyverse)
 library(rvest)
 library(ggsci)
+library(patchwork)
+source("https://raw.githubusercontent.com/Koohoko/Save-ggplot-to-pptx/main/scripts/save_pptx.r")
+
 
 df_mut_hk <- read_tsv("../data/hk_gisaid_hcov-19_2021_11_27_06.tsv")
 df_mut_hk$label <- ifelse(df_mut_hk$`Accession ID`=="EPI_ISL_6716902", "Case A", "Case B") # EPI_ISL_6716902 (12388)
@@ -48,6 +51,39 @@ df_check <- as_tibble(mat_check)
 colnames(df_check) <- df_mut$label
 df_out <- bind_cols(df_mut_sum, df_check)
 
+## add nt position
+df_orf <- read_csv("../data/ORF_SCoV2.csv")
+# df_orf$sequence <- gsub("nsp", "NSP", df_orf$sequence)
+# df_orf$sequence <- gsub("^S$", "Spike", df_orf$sequence)
+df_pos_nt <- lapply(seq_len(nrow(df_out)), function(i){
+	# print(i)
+	gene_t <- tolower(df_out$Gene[i])
+	pos_t_sim <- df_out$Position[i]
+
+	if(gene_t=="nsp12"){
+		if(pos_t_sim<=9){gene_t <- "nsp12_1"}else{
+			pos_t_sim <- pos_t_sim-9
+			gene_t <- "nsp12_2"
+			}
+	} 
+	if(gene_t=="spike"){
+		gene_t <- "s"
+	} 
+	if(sum(tolower(df_orf$sequence) == gene_t)>0){
+		ref_data_proteins_t <- df_orf %>% filter(tolower(sequence) == gene_t)
+	} else {
+		gene_t <- paste0("orf",gene_t)
+		ref_data_proteins_t <- df_orf %>% filter(tolower(sequence) == gene_t)
+	}
+	print(gene_t)
+	stopifnot(nrow(ref_data_proteins_t)>0)
+	pos_nt_start <- pos_t_sim*3-2 + ref_data_proteins_t$start -1
+	pos_nt_stop <- pos_t_sim*3 + ref_data_proteins_t$start -1
+	tibble(mut=df_out$mut[i], pos_nt_start=pos_nt_start, pos_nt_stop=pos_nt_stop)
+})
+df_pos_nt <- bind_rows(df_pos_nt)
+df_out <- left_join(df_out, df_pos_nt, "mut")
+
 # in other variants
 ## from cov-lineages
 df_lin_def_snps <- read_csv("../../2021-06-02_lineage_specific_snps/results/df_defining_snps_nt.csv")
@@ -56,7 +92,7 @@ df_lin_def_snps$orf <- toupper(df_lin_def_snps$orf)
 df_lin_def_snps$orf <- gsub("^S", "Spike", df_lin_def_snps$orf)
 df_lin_def_snps <- df_lin_def_snps %>% filter(!grepl("+", variant, fixed=T))
 df_lin_def_snps <- df_lin_def_snps %>% filter(!grepl("Omicron", variant, fixed=T))
-df_covariants$orf <- df_lin_def_snps %>% select(variant:pos_orf)
+df_covariants <- df_lin_def_snps %>% select(variant:pos_orf)
 df_lin_def_snps$variant <- gsub("-like", "", df_lin_def_snps$variant)
 df_lin_def_snps$variant <- gsub("B.1.617.1", "Kappa (B.1.617.1)", df_lin_def_snps$variant)
 sort(unique(df_lin_def_snps$variant))
@@ -79,12 +115,87 @@ df_covariants$pos_orf <- sapply(df_covariants$mut, function(x){
 df_vocvoi_snps <- bind_rows(df_lin_def_snps, df_covariants %>% select(-mut))
 df_vocvoi_snps <- df_vocvoi_snps %>% arrange(variant, orf, pos_orf)
 
-df_out$Other_varaints <- sapply(seq_len(nrow(df_out)), function(i){
-	gene_i <- df_out$Gene[i]
-	pos_i <- df_out$Position[i]
-	tmp <- df_vocvoi_snps %>% filter(orf==gene_i, pos_orf==pos_i) %>% .$variant
-	paste0(unique(tmp), collapse = " | ")
+df_out_other_Var <- df_out %>% select(mut:Position, pos_nt_start:pos_nt_stop)
+df_out_other_Var <- lapply(seq_len(nrow(df_out_other_Var)), function(i){
+	gene_i <- df_out_other_Var$Gene[i]
+	pos_i <- df_out_other_Var$Position[i]
+	tmp1 <- df_vocvoi_snps %>% filter(pos_nt_start==df_out_other_Var$pos_nt_start[i]) %>% .$variant
+	tmp2 <- df_vocvoi_snps %>% filter(orf==gene_i, pos_orf==pos_i) %>% .$variant
+	tmp <- unique(c(tmp1, tmp2))
+	return(tibble(mut=df_out_other_Var$mut[i], found_in=tmp))
+	# paste0(unique(tmp), collapse = " | ")
 })
+df_out_other_Var <- bind_rows(df_out_other_Var)
+df_out_other_Var <- left_join(df_out_other_Var, df_out %>% select(mut:Position))
+df_out_other_Var$Type="VOC/VOI"
+
+df_plot <- df_out %>% pivot_longer((`Case A`:`hCoV-19/South Africa/NICD-N21607-DX64624/2021`), names_to="found_in") %>% filter(value!="")
+df_plot$Type="B.1.1.529"
+df_plot <- bind_rows(df_plot, df_out_other_Var)
+df_plot <- df_plot %>% filter(!is.na(Gene))
+df_plot$gene_facet <- factor(df_plot$Gene, levels=levels(df_plot$Gene), labels=gsub("NSP", "", levels(df_plot$Gene)))
+
+df_plot %>% mutate(value="Y") %>% pivot_wider(id_cols=mut:Position, names_from=found_in, values_from=value) %>% write_csv("../results/mut_table_manual.csv", na="") # https://covariants.org/variants/21G.Lambda manual edit afterwards
+
+df_plot2 <- readxl::read_xlsx("../results/mut_table_manual_edit.xlsx")
+df_plot2 <- df_plot2 %>% select(-(`hCoV-19/Botswana/R40B59_BHP_3321001248/2021`:`hCoV-19/Hong Kong/VM21044713/2021` | `Case B`)) %>% pivot_longer((`Case A` | `Lambda (C.37)`:`Epsilon (B.1.427/429)`), names_to="found_in") %>% filter(!is.na(value))
+df_plot2$Type <- ifelse(grepl("Case", df_plot2$found_in), "", "VOI")
+
+df_plot2$Gene <- factor(df_plot2$Gene, levels=levels(df_plot$Gene))
+levels_t <- df_plot2 %>% arrange(Gene, Position) %>% group_by(Gene, Position) %>% summarise(out=unique(Mutation)) %>% .$out
+df_plot2$Mutation <- factor(df_plot2$Mutation, levels_t)
+
+df_plot2$VOC <- grepl("Alpha", df_plot2$found_in) | grepl("Beta", df_plot2$found_in) | grepl("Gamma", df_plot2$found_in) | grepl("Delta", df_plot2$found_in)
+df_plot2$Type[df_plot2$VOC] <- "VOC"
+df_plot2$VOC <- df_plot2$VOC | grepl("Case", df_plot2$found_in)
+
+df_plot2 %>% filter(found_in=="Case A", Gene=="Spike") %>% .$Mutation %>% unique() %>% length()
+df_plot2 %>% filter(found_in=="Case A", Gene!="Spike") %>% .$Mutation %>% unique() %>% length()
+
+df_plot2 %>% filter(found_in!="Case A", Gene=="Spike") %>% .$Mutation %>% unique() %>% length()
+15/35
+df_plot2 %>% filter(Type=="VOC", Gene=="Spike") %>% .$Mutation %>% unique() %>% length()
+11/35
+
+p1 <- ggplot(df_plot2)+
+	geom_tile(aes(x=Mutation, y=found_in, fill=VOC), show.legend = FALSE)+
+	# facet_wrap(vars(Type), ncol=1, scales="free_y")+
+	facet_grid(cols=vars(Gene), rows=vars(Type), scales="free", space="free")+
+	theme_classic()+
+	scale_fill_manual(values=rev(pal_uchicago()(2)))+
+	# theme_minimal()+
+	theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position='top', strip.text.x=element_text(angle=90, hjust=0.5, vjust=0.5))+
+	ylab("Variants / sequences")+
+	xlab("Mutations")+
+	ggtitle("B")+
+	NULL
+
+p1_rotate <- ggplot(df_plot2)+
+	geom_tile(aes(y=Mutation, x=found_in, fill=VOC), show.legend = FALSE)+
+	# facet_wrap(vars(Type), ncol=1, scales="free_y")+
+	facet_grid(rows=vars(Gene), cols=vars(Type), scales="free", space="free", switch="x")+
+	theme_classic()+
+	scale_fill_manual(values=rev(pal_uchicago()(2)))+
+	scale_x_discrete(position = "top") +
+	# theme_minimal()+
+	theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position='top', strip.text.y=element_text(angle=0, hjust=0.5, vjust=0.5))+
+	xlab("")+
+	ylab("Mutations")+
+	ggtitle("B")+
+	NULL
+
+ggsave("../results/common_muts_all.pdf", width=12, height=12/sqrt(2))
+save_pptx("../results/common_muts_all.pptx", width=10*sqrt(2)*0.25, height=10)
+
+load("../results/p2.rdata")
+p3 <- p2/p1 + plot_layout(heights = c(0.75, 0.25),guides='collect') &
+  theme(legend.position='top')
+ggsave("../results/Figure 1.pdf", heigh=13, width = 13/sqrt(2))
+
+p3 <- p2_time+p1_rotate + plot_layout(widths = c(0.75, 0.25))
+ggsave("../results/Figure 1_timetree.pdf", height=10, width = 10*sqrt(2))
+ggsave("../results/Figure 1_timetree.png", height=10, width = 10*sqrt(2))
+save_pptx("../results/Figure 1_timetree.pptx", height=10, width = 10*sqrt(2))
 
 # Parse Covsurver results
 rst <- readLines("../data/coronamapBlast.pl.html")
@@ -107,9 +218,17 @@ df_covsurver$Occurrence <- sapply(rst_split, function(x){
 	time_tmp <- gsub("\\(.+\\) ", "", time_tmp)
 	if(is.na(time_tmp)){return(NA)}
 	paste0(time_tmp, "countries")
+	# strsplit(rst_split, " times")[[1]][1]
 }, USE.NAMES = F)
 df_covsurver$Occurrence <- gsub("timein", "time in", df_covsurver$Occurrence)
 df_covsurver$Occurrence <- gsub("1 countries", "1 country", df_covsurver$Occurrence)
+
+df_covsurver$Frequency <- sapply(rst_split, function(x){
+	tmp <- strsplit(x, "already occurred ", fixed=T)[[1]][2]
+	time_tmp <- strsplit(tmp, "countr", fixed=T)[[1]][1]
+	time_tmp <- strsplit(time_tmp, " (", fixed=T)[[1]][2]
+	time_tmp <- strsplit(time_tmp, " ", fixed=T)[[1]][1]
+}, USE.NAMES = F)
 
 df_covsurver$First_collected <- sapply(rst_split, function(x){
 	tmp <- strsplit(x, " collected in ", fixed=T)[[1]][2]
@@ -128,8 +247,8 @@ df_covsurver$annotation <- factor(df_covsurver$color, levels=c("black", "blue", 
 
 df_covsurver$mut <- gsub(" ", "_", df_covsurver$muts)
 
-df_out2 <- left_join(df_out, df_covsurver %>% select(-muts))
-df_out2 <- df_out2 %>% select(mut:Position, Other_varaints:annotation, everything())
+df_out2 <- left_join(df_out %>% select(mut:Position), df_covsurver %>% select(-muts))
+# df_out2 <- df_out2 %>% select(mut:Position, Other_varaints:annotation, everything())
 writexl::write_xlsx(df_out2 %>% select(-mut, -Position, -color), "../results/mut_check.xlsx")
 
 df_out2 %>% filter(Gene=="Spike" & nchar(Other_varaints)>0)
