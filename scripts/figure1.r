@@ -101,7 +101,7 @@ names(seqs_hk)[grepl("12404", names(seqs_hk))] <- "Case_B"
 writeXStringSet(c(seqs[1], seqs_hk), "../results/seqs_hk_toalign.fasta") ## compare with the Sanger results
 file_in <- "../results/sanger_seqs_add.fasta"
 file_out <- "../results/seqs_hk_sanger.fasta"
-system(paste0("mafft --localpair --maxiterate 1000 --thread -8 --keeplength --addfragments ", file_in, " ../results/ref_seq.fasta > ", file_out)) ## visual inspection
+system(paste0("mafft --localpair --maxiterate 1000 --thread 8 --keeplength --addfragments ", file_in, " ../results/ref_seq.fasta > ", file_out)) ## visual inspection
 # system(paste0("mafft --localpair --maxiterate 1000 --thread -8 --keeplength --addfragments ", "../results/sanger_seqs_long.fasta", " ../results/ref_seq.fasta > ", "../results/seqs_hk_sanger_long.fasta")) ## visual inspection
 
 seqs_edit <- readDNAStringSet("../results/../results/seqs_hk_sanger_edit.fasta")
@@ -111,14 +111,24 @@ names(seqs_hk) <- gsub("_filled", "", names(seqs_hk))
 seqs_sub <- c(seqs_ref, seqs_hk)
 file_seqs_sub <- "../results/seqs_sub.fasta"
 writeXStringSet(seqs_sub, file_seqs_sub)
+write_csv(df_seq_meta_selected, "../results/df_seq_sub.csv")
+
+system(paste0("mafft --auto --thread 8 --keeplength --addfragments ", "../data/Omicron_gisaid_hcov-19_2021_12_01_03.fasta", " ../results/ref_seq.fasta > ", "../results/Omicron_global_aligned.fasta")) 
+seqs_omic <- readDNAStringSet("../results/Omicron_global_aligned.fasta")
+seqs_sub_more <- c(seqs_ref, seqs_hk, seqs_omic)
+names(seqs_sub_more)[grepl("Hong_Kong", names(seqs_sub_more))]
+seqs_sub_more <- seqs_sub_more[!grepl("Hong_Kong", names(seqs_sub_more))]
+file_seqs_sub_more <- "../results/seqs_sub_more.fasta" 
+writeXStringSet(seqs_sub_more, file_seqs_sub_more)
 
 df_date <- df_seq_meta_selected %>% select(strain, date)
 df_date <- bind_rows(df_date, tibble(strain=c("Case_A", "Case_B"), date=ymd(c("2021-11-13", "2021-11-18"))))
 write_tsv(df_date, "../results/df_date.tsv", col_names=F)
 
 system(paste0('~/Documents/iqtree-2.1.3-MacOSX/bin/iqtree2 -T 16 -m GTR+F+R2 --redo -s ', file_seqs_sub, ' -o "Wuhan-Hu-1/2019" --date ../results/df_date.tsv --date-root 2019-12-26 --date-ci 100 --date-options "-l -1"'))
+# system(paste0('~/Documents/iqtree-2.1.3-MacOSX/bin/iqtree2 -T 16 -m JC+FQ --redo -s ', file_seqs_sub_more, ' -o "Wuhan-Hu-1/2019"'))
 
-tree <- read.tree("../results/seqs_sub.fasta.treefile")
+tree <- read.tree("../results/nextstrain__tree.nwk")
 p <- ggtree(tree, size=0.3)
 df_seq_meta$label <- df_seq_meta$strain
 df_seq_meta$label2 <- df_seq_meta$pango_lineage
@@ -126,21 +136,27 @@ p$data <- left_join(p$data, df_seq_meta)
 p$data$lineage_sim <- ifelse(grepl("^Case_", p$data$label), "B", "Others")
 p$data$lineage_sim[p$data$label2 %in% c("B.1.1.7", "B.1.351", "B.1.617.2", "P.1")] <- "B"
 p$data$label <-  gsub("Case_", "Case ", p$data$label, fixed=T)
-# p$data$label2[grepl("^Case_", p$data$label)] <- p$data$label[grepl("^Case_", p$data$label)]
+p$data$label2[is.na(p$data$label2) & p$data$isTip] <- p$data$label[is.na(p$data$label2) & p$data$isTip]
+p$data$label2[grepl("^Case", p$data$label2)] <- NA
+
+p$data$label2[grepl("^EPI", p$data$label2)] <- sapply(p$data$label2[grepl("^EPI", p$data$label2)], function(x){
+	names(seqs_sub_more)[grepl(x, names(seqs_sub_more))]
+})
 # p$data$text_size <- ifelse(grepl("^Case_", p$data$label), 0.6, 0.2)
 
 font_size=2.2
 
 p2 <- p + 
-	geom_tiplab(aes(label=label2, color=lineage_sim), show.legend = FALSE, size=font_size)+
-	geom_text_repel(aes(label=label), size=5, data=. %>% filter(grepl("^Case", label)), color=pal_uchicago()(1), nudge_x=0.0003, alpha=0.9)+
+	geom_tiplab(aes(label=label2), show.legend = FALSE, size=1, color="black")+
+	geom_text_repel(aes(label=label), size=5, data=. %>% filter(grepl("^Case", label)), color=pal_uchicago()(1), nudge_x=-5, nudge_y=2, alpha=0.9)+
 	geom_tippoint(aes(color=lineage_sim), show.legend = FALSE, alpha=0.8, size=0.3)+
 	scale_color_uchicago()+
 	theme(legend.position = "bottom")+
-	# xlim(0, 0.003)+
-	ggtitle("A")+
+	xlim(0, 80)+
+	# ggtitle("A")+
 	NULL
-ggsave("../results/tree.pdf", heigh=10, width = 6)
+ggsave("../results/tree.pdf", heigh=7.5*sqrt(2), width = 7.5)
+save_pptx("../results/tree.pptx", height=7.5*sqrt(2), width = 7.5)
 
 timetree <- treeio::read.beast("../results/seqs_sub.fasta.timetree.nex")
 mrsd <- max(df_date$date, na.rm = T)
