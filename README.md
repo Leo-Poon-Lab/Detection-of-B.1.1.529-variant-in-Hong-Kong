@@ -7,6 +7,6 @@
 ![](/results/timeline.png)
 
 ## Phylogenetic relationships and mutation profiles of the B.1.1.529 variant in Hong Kong
-![](/results/Figure 1 revised.png)
+![](/results/Figure%201%20revised.png)
 
 ---
