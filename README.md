@@ -3,6 +3,8 @@
 
 ---
 
+[The paper is now available on the EID journal.](https://doi.org/10.3201/eid2802.212422)
+
 ## Timeline of the detection and transmission of the B.1.1.529 variant in Hong Kong
 ![](/results/timeline.png)
 
